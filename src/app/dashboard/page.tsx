@@ -17,10 +17,10 @@ export default function DashboardPage() {
       return;
     }
 
-    const existingToken = localStorage.getItem("access_token");
-    if (!existingToken) {
-      router.replace("/auth/signin");
-    }
+    // const existingToken = localStorage.getItem("access_token");
+    // if (!existingToken) {
+    //   router.replace("/auth/signin");
+    // }
   }, [router, searchParams]);
 
   return (
