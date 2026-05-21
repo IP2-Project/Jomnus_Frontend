@@ -1,18 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import axios from "axios";
 import {
   X,
   DollarSign,
   BriefcaseBusiness,
   Loader2,
 } from "lucide-react";
+import api from "@/lib/axios";
 
 type Props = {
   taskId: number;
   taskTitle: string;
   defaultPrice: number;
+  onApplied?: () => void;
   onClose: () => void;
 };
 
@@ -20,6 +21,7 @@ export default function ApplyTaskModal({
   taskId,
   taskTitle,
   defaultPrice,
+  onApplied,
   onClose,
 }: Props) {
   const [offeredPrice, setOfferedPrice] = useState(
@@ -32,18 +34,16 @@ export default function ApplyTaskModal({
     try {
       setLoading(true);
 
-      await axios.post(
-        "http://localhost:3001/api/applications",
+      await api.post(
+        "/applications",
         {
           taskId,
           offeredPrice: Number(offeredPrice),
-        },
-        {
-          withCredentials: true,
         }
       );
 
       alert("Application submitted successfully!");
+      onApplied?.();
       onClose();
     } catch (err: any) {
       console.error(err);

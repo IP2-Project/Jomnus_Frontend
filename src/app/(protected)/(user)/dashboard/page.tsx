@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import DetailTaskCard from "@/components/myrequest/DetailTaskCard";
 import TaskDetailModal from "@/components/myrequest/TaskDetailModal";
 import { Task } from "@/types/task";
 import ApplyTaskModal from "@/components/applications/ApplyTaskModal";
+import api from "@/lib/axios";
+
 type Category = {
   id: number;
   name: string;
@@ -14,26 +16,51 @@ type Category = {
 };
 
 type TaskApi = {
+  id: number;
+
+  title: string;
+
+  description?: string | null;
+
+  location_text?: string | null;
+
+  latitude?: number | null;
+
+  longitude?: number | null;
+
+  price: number;
+
+  created_at: string;
+
+  updated_at?: string;
+
+  start_date?: string | null;
+
+  deadline: string;
+
+  required_workers?: number;
+
+  status:
+    | "POSTED"
+    | "ACCEPTED"
+    | "IN_PROGRESS"
+    | "PARTIAL_COMPLETED"
+    | "COMPLETED"
+    | "VERIFIED"
+    | "CANCELLED";
+
+  requester?: {
     id: number;
-    title: string;
-    description?: string | null;
-    location_text?: string | null;
-    price: number;
-    created_at: string;
-    deadline: string;
-    requester_id?: number;
-    latitude?: number;
-    longitude?: number;
-    requester?: {
-        id: number;
-        fullName: string;
-        profileImage?: string | null;
-    } | null;
+
+    fullName: string;
+
+    profileImage?: string | null;
+  } | null;
+
+  hasApplied?: boolean;
 };
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
-).replace(/\/$/, "");
+const TASKS_PER_PAGE = 6;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -42,12 +69,50 @@ export default function DashboardPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [tasks, setTasks] = useState<Task[]>([]);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const [selectedApplyTask, setSelectedApplyTask] = useState<Task | null>(null);  
+
+  const markTaskApplied = (taskId: number) => {
+    setTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === taskId ? { ...task, hasApplied: true } : task,
+      ),
+    );
+  };
+
+  const filteredTasks = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+
+    return [...tasks]
+      .filter((task) => {
+        if (!normalizedSearch) return true;
+
+        return [
+          task.title,
+          task.description,
+          task.locationText,
+          task.requesterName,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(normalizedSearch));
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
+  }, [searchTerm, tasks]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / TASKS_PER_PAGE));
+  const paginatedTasks = filteredTasks.slice(
+    (currentPage - 1) * TASKS_PER_PAGE,
+    currentPage * TASKS_PER_PAGE,
+  );
 
   useEffect(() => {
     const token = searchParams.get("token");
@@ -67,33 +132,50 @@ export default function DashboardPage() {
       try {
         const token = localStorage.getItem("access_token");
 
-        const res = await fetch(`${API_BASE_URL}/tasks`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`, // IMPORTANT
-          },
-        });
+        const res = await api.get<TaskApi[]>("/tasks")
 
-        if (!res.ok) {
-          throw new Error(`Failed to fetch tasks (${res.status})`);
-        }
+        const data = res.data;
 
-        const data: TaskApi[] = await res.json();
 
         const mapped: Task[] = data.map((task) => ({
           id: task.id,
+
           title: task.title,
+
           description: task.description || "",
+
           locationText: task.location_text || "",
+
+          latitude: task.latitude ?? undefined,
+
+          longitude: task.longitude ?? undefined,
+
           price: task.price,
+
           createdAt: task.created_at,
+
+          updatedAt: task.updated_at,
+
+          startDate: task.start_date || "",
+
           deadline: task.deadline,
-          requesterName: task.requester?.fullName || "Unknown",
+
+          requester_id: task.requester?.id,
+
+          requester: task.requester,
+          requiredWorkers:
+            task.required_workers || 1,
+
+          status: task.status,
+
+          requesterName:
+            task.requester?.fullName || "Unknown",
+
+          hasApplied: task.hasApplied ?? false,
+
           priority: "Normal",
+
           requestCount: 0,
-          latitude: task.latitude,
-          longitude: task.longitude,
         }));
 
         setTasks(mapped);
@@ -112,20 +194,13 @@ export default function DashboardPage() {
       try {
         setIsLoadingCategories(true);
 
-        const res = await fetch(`${API_BASE_URL}/categories`, {
-          method: "GET",
+        const res = await api.get<Category[]>("/categories", {
           signal: controller.signal,
-          headers: { "Content-Type": "application/json" },
         });
 
-        if (!res.ok) {
-          throw new Error(`Failed to fetch categories (${res.status})`);
-        }
-
-        const data: Category[] = await res.json();
-        setCategories(data);
+        setCategories(res.data);
       } catch (error) {
-        if ((error as Error).name !== "AbortError") {
+        if ((error as Error).name !== "CanceledError") {
           console.error("Error loading categories:", error);
         }
       } finally {
@@ -136,6 +211,16 @@ export default function DashboardPage() {
     loadCategories().then((r) => console.log("Categories loaded:", r));
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategory]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div className="min-h-screen bg-white p-4 md:p-8">
@@ -150,6 +235,8 @@ export default function DashboardPage() {
               <input
                 type="text"
                 placeholder="e.g. 'Decor', 'Shopping'..."
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 className="w-full bg-slate-50 border-none rounded-xl py-3 px-4 text-sm focus:ring-2 focus:ring-blue-500"
               />
               <SlidersHorizontal
@@ -200,12 +287,57 @@ export default function DashboardPage() {
 
         {/* Task Cards Container */}
         <div className="space-y-6">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Available Tasks</h2>
+              <p className="text-sm text-slate-500">
+                Showing newest tasks first.
+              </p>
+            </div>
+            <p className="text-sm font-semibold text-slate-500">
+              {filteredTasks.length} task{filteredTasks.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
           {/* Task card*/}
           <div className="space-y-6">
-            {tasks.map((task) => (
+            {paginatedTasks.map((task) => (
               <DetailTaskCard key={task.id} task={task} onOpen={setSelectedTask} onApply={setSelectedApplyTask}/>
             ))}
           </div>
+
+          {filteredTasks.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
+              No tasks match your search.
+            </div>
+          )}
+
+          {filteredTasks.length > TASKS_PER_PAGE && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                Page {currentPage} of {totalPages}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={currentPage === 1}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={16} />
+                  Previous
+                </button>
+                <button
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={currentPage === totalPages}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {selectedTask && (
             <TaskDetailModal
               task={selectedTask}
@@ -221,6 +353,7 @@ export default function DashboardPage() {
             taskId={selectedApplyTask.id}
             taskTitle={selectedApplyTask.title}
             defaultPrice={selectedApplyTask.price}
+            onApplied={() => markTaskApplied(selectedApplyTask.id)}
             onClose={() => setSelectedApplyTask(null)}
           />
         )
